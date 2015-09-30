@@ -178,8 +178,6 @@ class MongoDocument():
         except:
             return -errno.EINVAL
               
-        print ">>>>>>", doc
-              
         doc["_id"] = self.document_id
         self.mongo[self.database][self.collection].update({"_id": self.document_id}, doc)
         return 0
@@ -209,7 +207,6 @@ class MongoDocument():
     def flush(self, fh):
         #If is writeable, needs to sync with DB
         if hasattr(fh, "write"):
-            print("WRITE!")
             return self.store_doc_json(fh.getvalue())
       
     def read(self, length, offset, fh):
@@ -221,8 +218,6 @@ class MongoDocument():
         fh.write(buffer)
         return len(buffer)
 
-    def truncate(self, *args):
-        print("===========", args)
 
 if __name__ == '__main__':
     main(MongoFS)
