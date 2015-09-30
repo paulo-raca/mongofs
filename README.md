@@ -38,12 +38,10 @@ Supported operations:
 - Create
 - Remove
 - Read
-- Write, _but has issues..._
+- Write
 
 TODO:
 
-- Support for truncate/ftruncate (Otherwise we can only save larger files)
-- Make it compatible with [Kate](kate-editor.org).
 - Read/Write documents using [Mongo's Query Syntax](http://docs.mongodb.org/manual/reference/mongodb-extended-json/)
 - Preserve field order on Load/Store
 - Support for custom filename attributes ("{field_name}/{field_value}.json" instead of "{id}.json")

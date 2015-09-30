@@ -18,6 +18,7 @@ class MongoFS(RouteFS):
         RouteFS.__init__(self, *args, **kwargs)
         self.fuse_args.add("allow_other", True)
         self.host = "localhost"
+        self.file_cache = {}
         self.parser.add_option(mountopt="host",
             metavar="HOSTNAME", 
             default=self.host,
@@ -170,6 +171,14 @@ class MongoCollection():
             yield fuse.Direntry(str(doc["_id"]) + ".json")
             
 
+# truncate() runs without a file handler.
+# To make it work, we must share state outside of the "FileHandle" abstraction
+class MongoSharedFileHandle:
+    def __init__(self, buffer):
+        self.buffer = buffer
+        self.dirty = False
+        self.refs = 0
+
 class MongoDocument():
     def __init__(self, mongofs, database, collection, document_id):
         self.mongofs = mongofs
@@ -217,29 +226,40 @@ class MongoDocument():
     def unlink(self):
         self.mongo[self.database][self.collection].delete_one({"_id": self.document_id})
         return 0
-        
+
+    def truncate(self, len):
+        fh = self.open(0)
+        fh.buffer.truncate(len)
+        self.release(0, fh)
+        return 0        
     
     def open(self, flags):
-        if (flags & os.O_RDWR) or (flags & os.O_WRONLY):
-            return StringIO(self.fetch_doc_json()) #RW buffer
-        else: 
-            return cStringIO(self.fetch_doc_json()) #RO buffer
+        fh = self.mongofs.file_cache.get( (self.database, self.collection, self.document_id), None )
+        if fh is None:
+            fh = MongoSharedFileHandle(StringIO(self.fetch_doc_json()))
+            self.mongofs.file_cache[ (self.database, self.collection, self.document_id) ] = fh
+        fh.refs += 1
+        return fh
     
     def release(self, flags, fh):
-        return 0
+        fh.refs -= 1
+        if fh.refs == 0:
+            del self.mongofs.file_cache[ (self.database, self.collection, self.document_id) ]
+            self.flush(fh)
 
     def flush(self, fh):
-        #If is writeable, needs to sync with DB
-        if hasattr(fh, "write"):
-            return self.store_doc_json(fh.getvalue())
+        if fh.dirty:
+            fh.dirty=False
+            return self.store_doc_json(fh.buffer.getvalue())
       
     def read(self, length, offset, fh):
-        fh.seek(offset)
-        return fh.read(length)
+        fh.buffer.seek(offset)
+        return fh.buffer.read(length)
       
     def write(self, buffer, offset, fh):
-        fh.seek(offset)
-        fh.write(buffer)
+        fh.dirty = True
+        fh.buffer.seek(offset)
+        fh.buffer.write(buffer)
         return len(buffer)
 
 
