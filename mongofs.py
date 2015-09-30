@@ -24,7 +24,7 @@ class MongoFS(RouteFS):
         m.connect('/', controller='getDatabaseList')
         m.connect('/{database}', controller='getDatabase')
         m.connect('/{database}/{collection}', controller='getCollection')
-        m.connect('/{database}/{collection}/{document_id}', controller='getDocument')
+        m.connect('/{database}/{collection}/{document_id}.json', controller='getDocument')
         #m.connect('/README.txt', controller='getReadme')
         #m.connect('/{action}', controller='getLocker')
         return m
@@ -156,7 +156,7 @@ class MongoCollection():
         for member in ['.', '..']:
             yield fuse.Direntry(str(member))
         for doc in self.mongo[self.database][self.collection].find({}, {}):
-            yield fuse.Direntry(str(doc["_id"]))
+            yield fuse.Direntry(str(doc["_id"]) + ".json")
             
 
 class MongoDocument():
