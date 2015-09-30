@@ -12,9 +12,43 @@ When I realized I was copy-pasting between robomongo and my text editor all the 
 
 MongoFS exposes documents as `/{database}/{collection}/{document_id}.json`
 
-Supported Operations:
-|          | Create | Delete | Rename | Read | Write |
-|----------|--------|--------|--------|------|-------|
-|Database  | ✓      | ✓      | ✓      |      |       |
-|Collection| ✓      | ✓      | ☐      |      |       |
-|Document  | ✓      | ✓      | ☐      | ✓    | ✓    |
+### Databases
+
+Supported operations:
+
+- List
+- Create (Currently implemented by creating and removing a subcollection)
+- Remove
+- Rename (Currently implemented as a copydb + drop_database)
+
+### Collections
+
+Supported operations:
+
+- List
+- Create (Currently implemented by creating and removing a subcollection)
+- Remove
+
+TODO:
+
+- Rename
+
+### Documents
+
+Supported operations:
+
+- List
+- Create
+- Remove
+- Read
+- Write, _mostly_
+
+TODO:
+
+- Support for truncate/ftruncate (Otherwise we can only save larger files)
+- Make it compatible with [Kate](kate-editor.org).
+- Read/Write documents using [Mongo's Query Syntax](http://docs.mongodb.org/manual/reference/mongodb-extended-json/)
+- Preserve field order on Load/Store
+- Support for custom filename attributes ("{field_name}/{field_value}.json" instead of "{id}.json")
+- Support for O_APPEND _?_
+- Support for rename
