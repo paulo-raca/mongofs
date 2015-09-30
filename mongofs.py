@@ -73,10 +73,9 @@ class MongoServer():
         self.mongo = mongofs.mongo
 
     def getattr(self):
-        st = RouteStat()
-        st.st_mode = stat.S_IFDIR | 0777
-        st.st_nlink = 2
-        return st
+        return fuse.Stat(
+            st_mode=stat.S_IFDIR | 0777,
+            st_nlink=2)
 
     def readdir(self, offset):
         for member in ['.', '..'] + self.mongo.database_names():
@@ -93,10 +92,9 @@ class MongoDatabase():
         if self.database not in self.mongo.database_names():
             return -errno.ENOENT
       
-        st = RouteStat()
-        st.st_mode = stat.S_IFDIR | 0777
-        st.st_nlink = 2
-        return st
+        return fuse.Stat(
+            st_mode=stat.S_IFDIR | 0777,
+            st_nlink=2)
 
     def mkdir(self, mode):
         if self.database in self.mongo.database_names():
@@ -145,10 +143,9 @@ class MongoCollection():
         if self.collection not in self.mongo[self.database].collection_names():
             return -errno.ENOENT
       
-        st = RouteStat()
-        st.st_mode = stat.S_IFDIR | 0777
-        st.st_nlink = 2
-        return st
+        return fuse.Stat(
+            st_mode=stat.S_IFDIR | 0777,
+            st_nlink=2)
 
     def mkdir(self, mode):
         if self.collection in self.mongo[self.database].collection_names():
@@ -230,11 +227,10 @@ class MongoDocument():
         if json is None:
             return -errno.ENOENT
       
-        st = RouteStat()
-        st.st_mode =  stat.S_IFREG | 0666
-        st.st_nlink = 1
-        st.st_size = len(json)
-        return st
+        return fuse.Stat(
+            st_mode=stat.S_IFREG | 0666,
+            st_nlink=1,
+            st_size=len(json))
       
     def create(self, flags, mode):
         self.mongo[self.database][self.collection].insert_one({"_id": self.document_id})
