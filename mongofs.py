@@ -181,11 +181,17 @@ class MongoDocument():
     def fetch_doc_json(self):
         doc = self.mongo[self.database][self.collection].find_one({"_id": self.document_id}, {"_id": 0})
         if doc is not None:
-            return dumps(doc, indent=4) + "\n"
+            if len(doc) == 0:
+                return ""
+            else:
+                return dumps(doc, indent=4) + "\n"
           
     def store_doc_json(self, json):
         try:
-            doc = loads(json)
+            if len(json.strip()):
+                doc = loads(json)
+            else:
+                doc = {}
         except:
             return -errno.EINVAL
               
