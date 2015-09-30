@@ -43,6 +43,16 @@ class MongoFS(RouteFS):
         
     def fsinit(self):
         self.mongo = MongoClient(self.host)
+        
+    def statfs(self):
+        return fuse.StatVfs(
+            f_bsize=4096,
+            f_blocks=1048576,
+            f_bfree=1048576,
+            f_bavail=1048576,
+            f_files=1048576,
+            f_ffree=1048576,
+            f_favail=1048576)
 
     def make_map(self):
         m = Mapper()
