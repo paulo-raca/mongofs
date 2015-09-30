@@ -52,3 +52,4 @@ TODO:
 - Support for custom filename attributes ("{field_name}/{field_value}.json" instead of "{id}.json")
 - Support for O_APPEND _?_
 - Support for rename
+- getattr is quite slow, since it needs to read the whole document, transform to a JSon string and calculate the length.

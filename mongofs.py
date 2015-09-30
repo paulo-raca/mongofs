@@ -17,7 +17,14 @@ class MongoFS(RouteFS):
     def __init__(self, *args, **kwargs):
         RouteFS.__init__(self, *args, **kwargs)
         self.fuse_args.add("allow_other", True)
-        self.mongo = MongoClient("localhost")
+        self.host = "localhost"
+        self.parser.add_option(mountopt="host",
+            metavar="HOSTNAME", 
+            default=self.host,
+            help="Adress of mongo server. Either host, host:port or a mongo URI [default: %default]")
+        
+    def fsinit(self):
+        self.mongo = MongoClient(self.host)
 
     def make_map(self):
         m = Mapper()
