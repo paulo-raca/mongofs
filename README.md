@@ -17,4 +17,4 @@ Supported Operations:
 |----------|--------|--------|--------|------|-------|
 |Database  | ✓      | ✓      | ✓      |      |       |
 |Collection| ✓      | ✓      | ☐      |      |       |
-|Document  | ☐      | ☐      | ☐      | ✓    | ✓    |
+|Document  | ✓      | ✓      | ☐      | ✓    | ✓    |
