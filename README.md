@@ -26,11 +26,8 @@ Supported operations:
 Supported operations:
 
 - List
-- Create (Currently implemented by creating and removing a subcollection)
+- Create
 - Remove
-
-TODO:
-
 - Rename
 
 ### Documents
@@ -41,7 +38,7 @@ Supported operations:
 - Create
 - Remove
 - Read
-- Write, _mostly_
+- Write, _but has issues..._
 
 TODO:
 

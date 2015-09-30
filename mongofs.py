@@ -153,10 +153,14 @@ class MongoCollection():
             return -errno.EINVAL
         if self.collection not in self.mongo[self.database].collection_names():
             return -errno.ENOENT
-        if target.collection in self.mongo[self.database].collection_names():
+        if target.collection in self.mongo[target.database].collection_names():
             return -errno.EEXIST
 
-        # TODO
+        self.mongo.admin.command(
+            "renameCollection", "%s.%s" % (self.database, self.collection),
+            to="%s.%s" % (target.database, target.collection)
+        )
+
         return 0
 
     def readdir(self, offset):
