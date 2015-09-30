@@ -169,7 +169,7 @@ class MongoDocument():
 
     def fetch_doc_json(self):
         doc = self.mongo[self.database][self.collection].find_one({"_id": self.document_id}, {"_id": 0})
-        if doc:
+        if doc is not None:
             return dumps(doc, indent=4) + "\n"
           
     def store_doc_json(self, json):
@@ -193,6 +193,15 @@ class MongoDocument():
         st.st_size = len(json)
         return st
       
+    def create(self, flags, mode):
+        self.mongo[self.database][self.collection].insert_one({"_id": self.document_id})
+        return self.open(flags)
+    
+    def unlink(self):
+        self.mongo[self.database][self.collection].delete_one({"_id": self.document_id})
+        return 0
+        
+    
     def open(self, flags):
         if (flags & os.O_RDWR) or (flags & os.O_WRONLY):
             return StringIO(self.fetch_doc_json()) #RW buffer
