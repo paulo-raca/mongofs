@@ -10,8 +10,7 @@ from routes import Mapper
 from pymongo import MongoClient
 from bson.json_util import loads, dumps
 from bson.objectid import ObjectId
-from StringIO import StringIO
-from cStringIO import StringIO as cStringIO
+from io import BytesIO
 
 class MongoFS(RouteFS):
     def __init__(self, *args, **kwargs):
@@ -193,12 +192,12 @@ class MongoDocument():
             if len(doc) == 0:
                 return ""
             else:
-                return dumps(doc, indent=4) + "\n"
+                return dumps(doc, indent=4, ensure_ascii=False).encode('utf-8') + "\n"
           
     def store_doc_json(self, json):
         try:
             if len(json.strip()):
-                doc = loads(json)
+                doc = loads(json.decode('utf-8'))
             else:
                 doc = {}
         except:
@@ -236,7 +235,7 @@ class MongoDocument():
     def open(self, flags):
         fh = self.mongofs.file_cache.get( (self.database, self.collection, self.document_id), None )
         if fh is None:
-            fh = MongoSharedFileHandle(StringIO(self.fetch_doc_json()))
+            fh = MongoSharedFileHandle(BytesIO(self.fetch_doc_json()))
             self.mongofs.file_cache[ (self.database, self.collection, self.document_id) ] = fh
         fh.refs += 1
         return fh
