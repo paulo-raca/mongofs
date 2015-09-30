@@ -17,11 +17,29 @@ class MongoFS(RouteFS):
         RouteFS.__init__(self, *args, **kwargs)
         self.fuse_args.add("allow_other", True)
         self.host = "localhost"
+        self.json_escaping = False
+        self.json_encoding = "utf8"
+        self.json_indent = 4
         self.file_cache = {}
+        
         self.parser.add_option(mountopt="host",
             metavar="HOSTNAME", 
             default=self.host,
             help="Adress of mongo server. Either host, host:port or a mongo URI [default: %default]")
+        self.parser.add_option(mountopt="json_escaping",
+            action="store_true", dest="json_escaping",
+            default=self.json_escaping,
+            help="Escapes all non-ascii characters on the JSON strings [default: %default]")
+        self.parser.add_option(mountopt="json_encoding",
+            metavar="ENCODING", 
+            default=self.json_encoding,
+            help="Character encoding of JSON document [default: %default]")
+        self.parser.add_option(mountopt="json_indent",
+            metavar="INDENTATION", 
+            default=self.json_indent,
+            type=int,
+            help="Size of indentation on pretty-printed JSON documents [default: %default]")
+        
         
     def fsinit(self):
         self.mongo = MongoClient(self.host)
@@ -192,12 +210,12 @@ class MongoDocument():
             if len(doc) == 0:
                 return ""
             else:
-                return dumps(doc, indent=4, ensure_ascii=False).encode('utf-8') + "\n"
+                return dumps(doc, indent=self.mongofs.json_indent, ensure_ascii=self.mongofs.json_escaping).encode(self.mongofs.json_encoding, errors='replace') + "\n"
           
     def store_doc_json(self, json):
         try:
             if len(json.strip()):
-                doc = loads(json.decode('utf-8'))
+                doc = loads(json.decode(self.mongofs.json_encoding, errors='replace'))
             else:
                 doc = {}
         except:
