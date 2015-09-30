@@ -194,12 +194,10 @@ class MongoDocument():
         return st
       
     def open(self, flags):
-        if flags & os.O_RDWR: #RW buffer
-            return StringIO(self.fetch_doc_json())
-        elif flags & os.O_WRONLY: #Empty writeable buffer
-            return StringIO()
-        else: #Readonly buffer
-            return cStringIO(self.fetch_doc_json()) 
+        if (flags & os.O_RDWR) or (flags & os.O_WRONLY):
+            return StringIO(self.fetch_doc_json()) #RW buffer
+        else: 
+            return cStringIO(self.fetch_doc_json()) #RO buffer
     
     def release(self, flags, fh):
         return 0
