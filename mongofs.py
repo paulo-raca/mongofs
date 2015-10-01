@@ -8,9 +8,18 @@ import os
 from routefs import RouteFS, main, TreeEntry, RouteStat
 from routes import Mapper
 from pymongo import MongoClient
-from bson.json_util import loads, dumps
+from bson.json_util import dumps, object_hook as bson_object_hook
+from json import loads as json_loads
 from bson.objectid import ObjectId
+from bson import SON
 from io import BytesIO
+
+
+#Hack to preserve order of object fields
+def loads(*args, **kwargs):
+    kwargs['object_pairs_hook'] = lambda x: bson_object_hook(SON(x))
+    return json_loads(*args, **kwargs)
+    
 
 class MongoFS(RouteFS):
     def __init__(self, *args, **kwargs):
@@ -42,7 +51,7 @@ class MongoFS(RouteFS):
         
         
     def fsinit(self):
-        self.mongo = MongoClient(self.host)
+        self.mongo = MongoClient(self.host, document_class=SON)
         
     def statfs(self):
         return fuse.StatVfs(
