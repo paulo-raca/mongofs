@@ -87,22 +87,53 @@ class MongoFS(RouteFS):
         m.connect('/', controller='getDatabaseList')
         m.connect('/{database}', controller='getDatabase')
         m.connect('/{database}/{collection}', controller='getCollection')
-        m.connect('/{database}/{collection}/{document_id}.json', controller='getDocument')
+        m.connect('/{database}/{collection}/{filter_path:.*}.json', controller='getDocument')
+        m.connect('/{database}/{collection}/{filter_path:.*}', controller='getFilter')
         #m.connect('/README.txt', controller='getReadme')
         #m.connect('/{action}', controller='getLocker')
         return m
       
     def getDatabaseList(self, **kwargs):
-        return MongoServer(self)
-
+        try:
+            return MongoServer(self)
+        except:
+            return None
+        
     def getDatabase(self, database, **kwargs):
-        return MongoDatabase(self, self.unescape(database))
-
+        try:
+            return MongoDatabase(self, self.unescape(database))
+        except:
+            return None
+        
     def getCollection(self, database, collection, **kwargs):
-        return MongoCollection(self, self.unescape(database), self.unescape(collection))
-
-    def getDocument(self, database, collection, document_id, **kwargs):
-        return MongoDocument(self, self.unescape(database), self.unescape(collection), ObjectId(self.unescape(document_id)))
+        try:
+            return MongoCollection(self, self.unescape(database), self.unescape(collection))
+        except:
+            return None
+        
+    def parse_path(self, filter_path):
+        try: 
+            filter_path = tuple(map(self.unescape, filter_path.split("/")))
+            filter = SON(zip(filter_path[0::2], map(loads, list(filter_path[1::2]))))
+            current_field = filter_path[-1] if (len(filter_path) % 2) == 1 else None
+            return (filter, current_field)
+        except:
+            return None
+          
+    def getFilter(self, database, collection, filter_path, **kwargs):
+        try:
+            filter, current_field = self.parse_path(filter_path)
+            return MongoFilter(self, self.unescape(database), self.unescape(collection), filter, current_field)
+        except:
+            return None
+          
+    def getDocument(self, database, collection, filter_path, **kwargs):
+        try:
+            filter, current_field = self.parse_path(filter_path)
+            if current_field is None:
+                return MongoDocument(self, self.unescape(database), self.unescape(collection), filter)
+        except:
+            return None
 
 class DirEntry(fuse.Direntry):
     def __init__(self, name, **kwargs):
@@ -159,7 +190,7 @@ class MongoDatabase():
         target = self.mongofs._get_file(target)
         
         if not isinstance(target, MongoDatabase):
-            return -errno.EINVAL
+            return -errno.EACCES
         if self.database not in self.mongo.database_names():
             return -errno.ENOENT
         if target.database in self.mongo.database_names():
@@ -210,7 +241,7 @@ class MongoCollection():
         target = self.mongofs._get_file(target)
         
         if not isinstance(target, MongoCollection):
-            return -errno.EINVAL
+            return -errno.EACCES
         if self.collection not in self.mongo[self.database].collection_names():
             return -errno.ENOENT
         if target.collection in self.mongo[target.database].collection_names():
@@ -224,65 +255,100 @@ class MongoCollection():
         return 0
 
     def readdir(self, offset):
-        yield DirEntry('.')
-        yield DirEntry('..')
-        for doc in self.mongo[self.database][self.collection].find({}, {}):
-            yield DirEntry(str(doc["_id"]) + ".json")
-            
+        return MongoFilter(self.mongofs, self.database, self.collection, {}, None).readdir(offset)
 
-# truncate() runs without a file handler.
-# To make it work, we must share state outside of the "FileHandle" abstraction
-class MongoSharedFileHandle:
-    def __init__(self, buffer):
-        self.buffer = buffer
-        self.dirty = False
-        self.refs = 0
 
-class MongoDocument():
-    def __init__(self, mongofs, database, collection, document_id):
+class MongoFilter():
+    def __init__(self, mongofs, database, collection, filter, current_field):
         self.mongofs = mongofs
         self.mongo = mongofs.mongo
         self.database = database
         self.collection = collection
-        self.document_id = document_id
+        self.filter = filter
+        self.current_field = current_field
 
-    def fetch_doc_json(self):
-        doc = self.mongo[self.database][self.collection].find_one({"_id": self.document_id}, {"_id": 0})
-        if doc is not None:
-            if len(doc) == 0:
-                return ""
-            else:
-                return dumps(doc, indent=self.mongofs.json_indent, ensure_ascii=self.mongofs.json_escaping).encode(self.mongofs.json_encoding, errors='replace') + "\n"
-          
-    def store_doc_json(self, json):
-        try:
-            if len(json.strip()):
-                doc = loads(json.decode(self.mongofs.json_encoding, errors='replace'))
-            else:
-                doc = {}
-        except:
-            return -errno.EINVAL
-              
-        doc["_id"] = self.document_id
-        self.mongo[self.database][self.collection].update({"_id": self.document_id}, doc)
+    def getattr(self):
+        return fuse.Stat(
+            st_mode=stat.S_IFDIR | 0777,
+            st_nlink=2)
+
+    def mkdir(self, mode):
+        return -errno.EACCES
+
+    def rmdir(self):
+        if self.current_field is None:
+            self.mongo[self.database][self.collection].delete_many(self.filter)
+        else:
+            self.mongo[self.database][self.collection].update_many(self.filter, {"$unset": {self.current_field:1}})
         return 0
       
+    def rename(self, target):
+        return -errno.EACCES
+
+    def readdir(self, offset):
+        yield DirEntry('.')
+        yield DirEntry('..')
+        
+        # TODO: Needs optimisation
+        if self.current_field is None:
+            attrs = set()
+            for doc in self.mongo[self.database][self.collection].find(self.filter, limit=50):
+                for key, value in doc.iteritems():
+                    if key not in self.filter and not isinstance(value, dict) and not isinstance(value, list):
+                        attrs.add(key)
+            attrs -= set(self.filter.keys())
+            
+            for attr in attrs:
+                yield DirEntry(self.mongofs.escape(attr))
+        else:
+            for value in self.mongo[self.database][self.collection].distinct(self.current_field, filter=self.filter):
+                if not isinstance(value, dict) and not isinstance(value, list):
+                    count_filter = dict(self.filter)
+                    count_filter[self.current_field] = value
+                    count = self.mongo[self.database][self.collection].count(count_filter)
+                    yield DirEntry(self.mongofs.escape(dumps(value, ensure_ascii=False)) + (".json" if count == 1 else ""))
+                
+                
+# truncate() runs without a file handler.
+# To make it work, we must share state outside of the "FileHandle" abstraction
+class MongoSharedFileHandle:
+    def __init__(self, buffer, id):
+        self.buffer = buffer
+        self.id = id
+        self.dirty = False
+        self.refs = 0
+        self.flush_ret = 0
+
+
+class MongoDocument():
+    def __init__(self, mongofs, database, collection, filter):
+        self.mongofs = mongofs
+        self.mongo = mongofs.mongo
+        self.database = database
+        self.collection = collection
+        self.filter = filter
+        self.id = (database, collection) + tuple([item for pair in filter.iteritems() for item in pair])
+        print(self.id)
+
     def getattr(self):
-        json = self.fetch_doc_json()
-        if json is None:
+        fh = self.open(0)
+        if not isinstance(fh, MongoSharedFileHandle):
             return -errno.ENOENT
       
-        return fuse.Stat(
+        ret = fuse.Stat(
             st_mode=stat.S_IFREG | 0666,
             st_nlink=1,
-            st_size=len(json))
+            st_size=len(fh.buffer.getvalue()))
+      
+        self.release(0, fh)
+        return ret
       
     def create(self, flags, mode):
-        self.mongo[self.database][self.collection].insert_one({"_id": self.document_id})
+        self.mongo[self.database][self.collection].insert_one(self.filter)
         return self.open(flags)
     
     def unlink(self):
-        self.mongo[self.database][self.collection].delete_one({"_id": self.document_id})
+        self.mongo[self.database][self.collection].delete_one(self.filter)
         return 0
 
     def truncate(self, len):
@@ -292,28 +358,49 @@ class MongoDocument():
         return 0        
     
     def open(self, flags):
-        fh = self.mongofs.file_cache.get( (self.database, self.collection, self.document_id), None )
+        fh = self.mongofs.file_cache.get(self.id, None)
         if fh is None:
-            fh = MongoSharedFileHandle(BytesIO(self.fetch_doc_json()))
-            self.mongofs.file_cache[ (self.database, self.collection, self.document_id) ] = fh
+            doc = self.mongo[self.database][self.collection].find_one(self.filter)
+            if doc is None:
+                return -errno.ENOENT
+  
+            id = doc.pop("_id")
+            if len(doc) == 0:
+                json = ""
+            else:
+                json = dumps(doc, indent=self.mongofs.json_indent, ensure_ascii=self.mongofs.json_escaping).encode(self.mongofs.json_encoding, errors='replace') + "\n"
+            
+            fh = MongoSharedFileHandle(BytesIO(json), id)
+            self.mongofs.file_cache[self.id] = fh
         fh.refs += 1
         return fh
     
     def release(self, flags, fh):
         fh.refs -= 1
         if fh.refs == 0:
-            del self.mongofs.file_cache[ (self.database, self.collection, self.document_id) ]
-            self.flush(fh)
+            del self.mongofs.file_cache[self.id]
+            return self.flush(fh)
 
     def flush(self, fh):
         if fh.dirty:
             fh.dirty=False
-            return self.store_doc_json(fh.buffer.getvalue())
-      
+            try:
+                json = fh.buffer.getvalue()
+                if len(json.strip()):
+                    doc = loads(json.decode(self.mongofs.json_encoding, errors='replace'))
+                else:
+                    doc = {}
+                doc["_id"] = fh.id
+                self.mongo[self.database][self.collection].update({"_id": fh.id}, doc)
+                fh.flush_ret = 0
+            except:
+                fh.flush_ret = -errno.EINVAL              
+        return fh.flush_ret
+
     def read(self, length, offset, fh):
         fh.buffer.seek(offset)
         return fh.buffer.read(length)
-      
+
     def write(self, buffer, offset, fh):
         fh.dirty = True
         fh.buffer.seek(offset)

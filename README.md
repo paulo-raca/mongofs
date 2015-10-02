@@ -10,7 +10,7 @@ When I realized I was copy-pasting between robomongo and my text editor all the 
 
 ## Features
 
-MongoFS exposes documents as `/{database}/{collection}/{document_id}.json`
+MongoFS exposes documents as `/{database}/{collection}/{field}/{value}.json`
 
 ### Databases
 
@@ -21,7 +21,7 @@ Supported operations:
 - Remove
 - Rename (Currently implemented as a copydb + drop_database)
 
-### Collections
+### Collections - `/{database}`
 
 Supported operations:
 
@@ -29,6 +29,18 @@ Supported operations:
 - Create
 - Remove
 - Rename
+
+### Fields - `/{database}/{collection}/{field}`
+
+Supported operations:
+
+- List
+- Remove: _Removes the field from all matching documents_
+
+TODO:
+- Create: _Sets `field=null` on all matching documents
+- Rename: _Renames the field in all matching document_
+- Current implementation of list can be optimized
 
 ### Documents
 
@@ -43,7 +55,6 @@ Supported operations:
 TODO:
 
 - Read/Write documents using [Mongo's Query Syntax](http://docs.mongodb.org/manual/reference/mongodb-extended-json/)
-- Support for custom filename attributes ("{field_name}/{field_value}.json" instead of "{id}.json")
 - Support for O_APPEND _?_
 - Support for rename
 - getattr is quite slow, since it needs to read the whole document, transform to a JSon string and calculate the length.
