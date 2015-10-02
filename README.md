@@ -43,7 +43,6 @@ Supported operations:
 TODO:
 
 - Read/Write documents using [Mongo's Query Syntax](http://docs.mongodb.org/manual/reference/mongodb-extended-json/)
-- Preserve field order on Load/Store
 - Support for custom filename attributes ("{field_name}/{field_value}.json" instead of "{id}.json")
 - Support for O_APPEND _?_
 - Support for rename
