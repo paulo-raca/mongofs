@@ -1,5 +1,5 @@
 #!/usr/bin/python
-
+# -*- coding: utf-8 -*-
 
 import stat
 import errno
@@ -49,6 +49,25 @@ class MongoFS(RouteFS):
             type=int,
             help="Size of indentation on pretty-printed JSON documents [default: %default]")
         
+    def escape(self, name):
+        print(repr(name))
+        if name == '.':
+            return '&period;'
+        if name == '.,':
+            return '&period;&period;'
+        return name \
+            .replace("&" , "&amp;")  \
+            .replace("/" , "&sol;")  \
+            .replace("\\", "&bsol;") \
+            .replace("|" , "&vert;")
+            
+    def unescape(self, name):
+        return name \
+            .replace("&sol;"   , "/")  \
+            .replace("&bsol;"  , "\\") \
+            .replace("&vert;"  , "|")  \
+            .replace("&period;", ".")  \
+            .replace("&amp;"   , "&")
         
     def fsinit(self):
         self.mongo = MongoClient(self.host, document_class=SON)
@@ -77,14 +96,17 @@ class MongoFS(RouteFS):
         return MongoServer(self)
 
     def getDatabase(self, database, **kwargs):
-        return MongoDatabase(self, database)
+        return MongoDatabase(self, self.unescape(database))
 
     def getCollection(self, database, collection, **kwargs):
-        return MongoCollection(self, database, collection)
+        return MongoCollection(self, self.unescape(database), self.unescape(collection))
 
     def getDocument(self, database, collection, document_id, **kwargs):
-        return MongoDocument(self, database, collection, ObjectId(document_id))
+        return MongoDocument(self, self.unescape(database), self.unescape(collection), ObjectId(self.unescape(document_id)))
 
+class DirEntry(fuse.Direntry):
+    def __init__(self, name, **kwargs):
+        fuse.Direntry.__init__(self, name.encode("utf8"), **kwargs)
 
 class MongoServer():
     def __init__(self, mongofs):
@@ -97,8 +119,10 @@ class MongoServer():
             st_nlink=2)
 
     def readdir(self, offset):
-        for member in ['.', '..'] + self.mongo.database_names():
-            yield fuse.Direntry(str(member))
+        yield DirEntry('.')
+        yield DirEntry('..')
+        for member in self.mongo.database_names():
+            yield DirEntry(self.mongofs.escape(member))
 
 
 class MongoDatabase():
@@ -147,8 +171,10 @@ class MongoDatabase():
         return 0
 
     def readdir(self, offset):
-        for member in ['.', '..'] + self.mongo[self.database].collection_names(include_system_collections=False):
-            yield fuse.Direntry(str(member))
+        yield DirEntry('.')
+        yield DirEntry('..')
+        for member in self.mongo[self.database].collection_names(include_system_collections=False):
+            yield DirEntry(self.mongofs.escape(member))
             
 
 class MongoCollection():
@@ -198,10 +224,10 @@ class MongoCollection():
         return 0
 
     def readdir(self, offset):
-        for member in ['.', '..']:
-            yield fuse.Direntry(str(member))
+        yield DirEntry('.')
+        yield DirEntry('..')
         for doc in self.mongo[self.database][self.collection].find({}, {}):
-            yield fuse.Direntry(str(doc["_id"]) + ".json")
+            yield DirEntry(str(doc["_id"]) + ".json")
             
 
 # truncate() runs without a file handler.
