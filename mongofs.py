@@ -11,7 +11,7 @@ from pymongo import MongoClient
 from bson.json_util import dumps, object_hook as bson_object_hook
 from json import loads as json_loads
 from bson.objectid import ObjectId
-from bson import SON
+from bson import SON, Code
 from io import BytesIO
 
 
@@ -301,11 +301,17 @@ class MongoFilter():
             for attr in attrs:
                 yield DirEntry(self.mongofs.escape(attr))
         else:
-            for value in self.mongo[self.database][self.collection].distinct(self.current_field, filter=self.filter):
+            # Count the distinct values of the field
+            q = dict(self.filter)
+            q[self.current_field] = { "$exists": True }
+            values = self.mongo[self.database][self.collection].inline_map_reduce(
+                map    = Code("""function() { emit(this[fieldName], 1); }"""),
+                reduce = Code("""function(key, values) { return Array.sum(values); }"""),
+                query  = q,
+                scope  = {"fieldName": self.current_field})
+            values = ([(entry["_id"], entry["value"]) for entry in values])
+            for (value, count) in values:
                 if not isinstance(value, dict) and not isinstance(value, list):
-                    count_filter = dict(self.filter)
-                    count_filter[self.current_field] = value
-                    count = self.mongo[self.database][self.collection].count(count_filter)
                     yield DirEntry(self.mongofs.escape(dumps(value, ensure_ascii=False)) + (".json" if count == 1 else ""))
                 
                 
