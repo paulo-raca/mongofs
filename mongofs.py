@@ -29,7 +29,7 @@ class MongoFS(RouteFS):
         self.json_escaping = False
         self.json_encoding = "utf8"
         self.json_indent = 4
-        self.file_cache = {}
+        self.open_file_cache = {}
         
         self.parser.add_option(mountopt="host",
             metavar="HOSTNAME", 
@@ -84,7 +84,7 @@ class MongoFS(RouteFS):
 
     def make_map(self):
         m = Mapper()
-        m.connect('/', controller='getDatabaseList')
+        m.connect('/', controller='getRoot')
         m.connect('/{database}', controller='getDatabase')
         m.connect('/{database}/{collection}', controller='getCollection')
         m.connect('/{database}/{collection}/{filter_path:.*}.json', controller='getDocument')
@@ -93,9 +93,9 @@ class MongoFS(RouteFS):
         #m.connect('/{action}', controller='getLocker')
         return m
       
-    def getDatabaseList(self, **kwargs):
+    def getRoot(self, **kwargs):
         try:
-            return MongoServer(self)
+            return MongoRoot(self)
         except:
             return None
         
@@ -139,7 +139,7 @@ class DirEntry(fuse.Direntry):
     def __init__(self, name, **kwargs):
         fuse.Direntry.__init__(self, name.encode("utf8"), **kwargs)
 
-class MongoServer():
+class MongoRoot():
     def __init__(self, mongofs):
         self.mongofs = mongofs
         self.mongo = mongofs.mongo
@@ -364,7 +364,7 @@ class MongoDocument():
         return 0        
     
     def open(self, flags):
-        fh = self.mongofs.file_cache.get(self.id, None)
+        fh = self.mongofs.open_file_cache.get(self.id, None)
         if fh is None:
             doc = self.mongo[self.database][self.collection].find_one(self.filter)
             if doc is None:
@@ -377,14 +377,14 @@ class MongoDocument():
                 json = dumps(doc, indent=self.mongofs.json_indent, ensure_ascii=self.mongofs.json_escaping).encode(self.mongofs.json_encoding, errors='replace') + "\n"
             
             fh = MongoSharedFileHandle(BytesIO(json), id)
-            self.mongofs.file_cache[self.id] = fh
+            self.mongofs.open_file_cache[self.id] = fh
         fh.refs += 1
         return fh
     
     def release(self, flags, fh):
         fh.refs -= 1
         if fh.refs == 0:
-            del self.mongofs.file_cache[self.id]
+            del self.mongofs.open_file_cache[self.id]
             return self.flush(fh)
 
     def flush(self, fh):
