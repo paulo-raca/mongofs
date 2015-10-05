@@ -404,6 +404,7 @@ class MongoDocument(BaseMongoNode):
 
     def truncate(self, len):
         fh = self.open(0)
+        fh.dirty = True
         fh.buffer.truncate(len)
         self.release(0, fh)
         return 0        
