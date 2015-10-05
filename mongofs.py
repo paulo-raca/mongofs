@@ -13,6 +13,7 @@ from json import loads as json_loads
 from bson.objectid import ObjectId
 from bson import SON, Code
 from io import BytesIO
+from expiringdict import ExpiringDict
 
 
 #Hack to preserve order of object fields
@@ -30,6 +31,9 @@ class MongoFS(RouteFS):
         self.json_encoding = "utf8"
         self.json_indent = 4
         self.open_file_cache = {}
+        # There is a massive performance gain if we cache a directory's contents.
+        self.directory_cache = ExpiringDict(max_len=100, max_age_seconds=10)
+
         
         self.parser.add_option(mountopt="host",
             metavar="HOSTNAME", 
@@ -89,8 +93,6 @@ class MongoFS(RouteFS):
         m.connect('/{database}/{collection}', controller='getCollection')
         m.connect('/{database}/{collection}/{filter_path:.*}.json', controller='getDocument')
         m.connect('/{database}/{collection}/{filter_path:.*}', controller='getFilter')
-        #m.connect('/README.txt', controller='getReadme')
-        #m.connect('/{action}', controller='getLocker')
         return m
       
     def getRoot(self, **kwargs):
@@ -135,55 +137,82 @@ class MongoFS(RouteFS):
         except:
             return None
 
-class DirEntry(fuse.Direntry):
-    def __init__(self, name, **kwargs):
-        fuse.Direntry.__init__(self, name.encode("utf8"), **kwargs)
-
-class MongoRoot():
-    def __init__(self, mongofs):
+class BaseMongoNode():
+    def __init__(self, mongofs, id):
         self.mongofs = mongofs
         self.mongo = mongofs.mongo
+        self.id = id
+
+    def list_files_impl(self):
+        return None
+      
+    def list_files(self, cached=True):
+        try:
+            if not cached:
+                raise Exception("No caching")
+            elements = self.mongofs.directory_cache[self.id]
+        except:
+            try:
+                elements = self.list_files_impl()
+            except:
+                elements = None
+            self.mongofs.directory_cache[self.id] = elements
+        return elements
+        
+    def readdir(self, offset):
+        elements = self.list_files()
+            
+        if elements is None:
+            return
+
+        yield fuse.Direntry('.')
+        yield fuse.Direntry('..')
+        for x in elements:
+            yield fuse.Direntry(self.mongofs.escape(x).encode("utf8"))
+
+
+class MongoRoot(BaseMongoNode):
+    def __init__(self, mongofs):
+        BaseMongoNode.__init__(self, mongofs, ())
 
     def getattr(self):
         return fuse.Stat(
             st_mode=stat.S_IFDIR | 0777,
             st_nlink=2)
 
-    def readdir(self, offset):
-        yield DirEntry('.')
-        yield DirEntry('..')
-        for member in self.mongo.database_names():
-            yield DirEntry(self.mongofs.escape(member))
+    def list_files_impl(self):
+        return self.mongo.database_names()
 
 
-class MongoDatabase():
+class MongoDatabase(BaseMongoNode):
     def __init__(self, mongofs, database):
-        self.mongofs = mongofs
-        self.mongo = mongofs.mongo
         self.database = database
+        BaseMongoNode.__init__(self, mongofs, (database,))
 
     def getattr(self):
-        if self.database not in self.mongo.database_names():
+        if self.database not in MongoRoot(self.mongofs).list_files():
             return -errno.ENOENT
-      
+
         return fuse.Stat(
             st_mode=stat.S_IFDIR | 0777,
             st_nlink=2)
 
     def mkdir(self, mode):
-        if self.database in self.mongo.database_names():
+        if self.database in MongoRoot(self.mongofs).list_files():
             return -errno.EEXIST
           
         # There is no explicit "createDatabase" method. We must create something inside it.
         self.mongo[self.database].create_collection("_")
         self.mongo[self.database].drop_collection("_")
+        self.mongofs.directory_cache.clear()
         return 0
 
     def rmdir(self):
-        if self.database not in self.mongo.database_names():
+        if self.database not in MongoRoot(self.mongofs).list_files():
             return -errno.ENOENT
           
         self.mongo.drop_database(self.database)
+        self.mongofs.directory_cache.clear()
         return 0
 
     def rename(self, target):
@@ -191,50 +220,48 @@ class MongoDatabase():
         
         if not isinstance(target, MongoDatabase):
             return -errno.EACCES
-        if self.database not in self.mongo.database_names():
+        if self.database not in MongoRoot(self.mongofs).list_files():
             return -errno.ENOENT
-        if target.database in self.mongo.database_names():
+        if target.database in MongoRoot(self.mongofs).list_files():
             return -errno.EEXIST
 
         # There is no explicit "renameDatabase" method. We must clone a new DB and drop the old one.              
         self.mongo.admin.command('copydb', fromdb=self.database, todb=target.database)
         self.mongo.drop_database(self.database)
+        self.mongofs.directory_cache.clear()
         return 0
 
-    def readdir(self, offset):
-        yield DirEntry('.')
-        yield DirEntry('..')
-        for member in self.mongo[self.database].collection_names(include_system_collections=False):
-            yield DirEntry(self.mongofs.escape(member))
+    def list_files_impl(self):
+        return self.mongo[self.database].collection_names(include_system_collections=False)
             
-
-class MongoCollection():
+class MongoCollection(BaseMongoNode):
     def __init__(self, mongofs, database, collection):
-        self.mongofs = mongofs
-        self.mongo = mongofs.mongo
         self.database = database
         self.collection = collection
+        BaseMongoNode.__init__(self, mongofs, (database, collection))
 
     def getattr(self):
-        if self.collection not in self.mongo[self.database].collection_names():
+        if self.collection not in MongoDatabase(self.mongofs, self.database).list_files():
             return -errno.ENOENT
-      
+        
         return fuse.Stat(
             st_mode=stat.S_IFDIR | 0777,
             st_nlink=2)
 
     def mkdir(self, mode):
-        if self.collection in self.mongo[self.database].collection_names():
+        if self.collection in MongoDatabase(self.mongofs, self.database).list_files():
             return -errno.EEXIST
           
         self.mongo[self.database].create_collection(self.collection)
+        self.mongofs.directory_cache.clear()
         return 0
 
     def rmdir(self):
-        if self.collection not in self.mongo[self.database].collection_names():
+        if self.collection not in MongoDatabase(self.mongofs, self.database).list_files():
             return -errno.ENOENT
           
         self.mongo[self.database].drop_collection(self.collection)
+        self.mongofs.directory_cache.clear()
         return 0
 
     def rename(self, target):
@@ -242,26 +269,25 @@ class MongoCollection():
         
         if not isinstance(target, MongoCollection):
             return -errno.EACCES
-        if self.collection not in self.mongo[self.database].collection_names():
+        if self.collection not in MongoDatabase(self.mongofs, self.database).list_files():
             return -errno.ENOENT
-        if target.collection in self.mongo[target.database].collection_names():
+        if target.collection in MongoDatabase(self.mongofs, self.database).list_files():
             return -errno.EEXIST
 
         self.mongo.admin.command(
             "renameCollection", "%s.%s" % (self.database, self.collection),
             to="%s.%s" % (target.database, target.collection)
         )
-
+        self.mongofs.directory_cache.clear()
         return 0
 
-    def readdir(self, offset):
-        return MongoFilter(self.mongofs, self.database, self.collection, {}, None).readdir(offset)
+    def list_files_impl(self):
+        return MongoFilter(self.mongofs, self.database, self.collection, {}, None).list_files()
 
 
-class MongoFilter():
+class MongoFilter(BaseMongoNode):
     def __init__(self, mongofs, database, collection, filter, current_field):
-        self.mongofs = mongofs
-        self.mongo = mongofs.mongo
+        BaseMongoNode.__init__(self, mongofs, (database, collection) + tuple([item for pair in filter.iteritems() for item in pair]) + (() if current_field is None else (current_field,)))
         self.database = database
         self.collection = collection
         self.filter = filter
@@ -273,33 +299,31 @@ class MongoFilter():
             st_nlink=2)
 
     def mkdir(self, mode):
-        return -errno.EACCES
+        #All filters "exist" already, even if they are not listed
+        return -errno.EEXIST
 
     def rmdir(self):
         if self.current_field is None:
             self.mongo[self.database][self.collection].delete_many(self.filter)
         else:
             self.mongo[self.database][self.collection].update_many(self.filter, {"$unset": {self.current_field:1}})
+        self.mongofs.directory_cache.clear()
         return 0
       
     def rename(self, target):
+        #TODO
         return -errno.EACCES
 
-    def readdir(self, offset):
-        yield DirEntry('.')
-        yield DirEntry('..')
-        
-        # TODO: Needs optimisation
+    def list_files_impl(self):
         if self.current_field is None:
+            # TODO: Needs optimisation
             attrs = set()
             for doc in self.mongo[self.database][self.collection].find(self.filter, limit=50):
                 for key, value in doc.iteritems():
                     if key not in self.filter and not isinstance(value, dict) and not isinstance(value, list):
                         attrs.add(key)
             attrs -= set(self.filter.keys())
-            
-            for attr in attrs:
-                yield DirEntry(self.mongofs.escape(attr))
+            return list(attrs)
         else:
             # Count the distinct values of the field
             q = dict(self.filter)
@@ -309,10 +333,10 @@ class MongoFilter():
                 reduce = Code("""function(key, values) { return Array.sum(values); }"""),
                 query  = q,
                 scope  = {"fieldName": self.current_field})
-            values = ([(entry["_id"], entry["value"]) for entry in values])
-            for (value, count) in values:
-                if not isinstance(value, dict) and not isinstance(value, list):
-                    yield DirEntry(self.mongofs.escape(dumps(value, ensure_ascii=False)) + (".json" if count == 1 else ""))
+            return [
+                dumps(entry["_id"], ensure_ascii=False) + (".json" if entry["value"] == 1 else "")
+                for entry in values
+            ]
                 
                 
 # truncate() runs without a file handler.
@@ -326,36 +350,57 @@ class MongoSharedFileHandle:
         self.flush_ret = 0
 
 
-class MongoDocument():
+class MongoDocument(BaseMongoNode):
     def __init__(self, mongofs, database, collection, filter):
-        self.mongofs = mongofs
-        self.mongo = mongofs.mongo
+        BaseMongoNode.__init__(self, mongofs, (database, collection) + tuple([item for pair in filter.iteritems() for item in pair]))        
         self.database = database
         self.collection = collection
         self.filter = filter
-        self.id = (database, collection) + tuple([item for pair in filter.iteritems() for item in pair])
-        print(self.id)
 
     def getattr(self):
-        fh = self.open(0)
-        if not isinstance(fh, MongoSharedFileHandle):
-            return -errno.ENOENT
+        # If the file is already open, return the size of the buffer
+        fh = self.mongofs.open_file_cache.get(self.id, None)
+        if fh is not None:
+            return fuse.Stat(
+                st_mode=stat.S_IFREG | 0666,
+                st_nlink=1,
+                st_size=len(fh.buffer.getvalue()))
       
-        ret = fuse.Stat(
-            st_mode=stat.S_IFREG | 0666,
-            st_nlink=1,
-            st_size=len(fh.buffer.getvalue()))
-      
-        self.release(0, fh)
-        return ret
+        # It is faster to check the cached response of readdir() instead of looking up Mongo
+        parent_field = self.id[-2]
+        parent_filter = dict(self.filter)
+        del parent_filter[parent_field]
+        for valid_file in MongoFilter(self.mongofs, self.database, self.collection, parent_filter, parent_field).list_files():
+            if valid_file.endswith(".json"):
+                valid_file = valid_file[:-5]
+                if self.id[-1] == loads(valid_file):
+                    return fuse.Stat(
+                        st_mode=stat.S_IFREG | 0666,
+                        st_nlink=1,
+                        st_size=0)
+              
+        return -errno.ENOENT  
       
     def create(self, flags, mode):
-        self.mongo[self.database][self.collection].insert_one(self.filter)
+        base_doc = {"_id": self.filter["_id"]} if "_id" in self.filter else {}
+        id = self.mongo[self.database][self.collection].insert_one(base_doc).inserted_id
+        self.mongo[self.database][self.collection].update({"_id": id}, {"$set": self.filter})
+        self.mongofs.directory_cache.clear()
         return self.open(flags)
     
     def unlink(self):
         self.mongo[self.database][self.collection].delete_one(self.filter)
+        self.mongofs.directory_cache.clear()
         return 0
+
+    def unlink(self):
+        self.mongo[self.database][self.collection].delete_one(self.filter)
+        self.mongofs.directory_cache.clear()
+        return 0
+
+    def rename(self, target):
+        #TODO
+        return -errno.EACCES
 
     def truncate(self, len):
         fh = self.open(0)
@@ -370,7 +415,7 @@ class MongoDocument():
             if doc is None:
                 return -errno.ENOENT
   
-            id = doc.pop("_id")
+            id = doc["_id"]
             if len(doc) == 0:
                 json = ""
             else:
@@ -396,8 +441,8 @@ class MongoDocument():
                     doc = loads(json.decode(self.mongofs.json_encoding, errors='replace'))
                 else:
                     doc = {}
-                doc["_id"] = fh.id
                 self.mongo[self.database][self.collection].update({"_id": fh.id}, doc)
+                self.mongofs.directory_cache.clear()
                 fh.flush_ret = 0
             except:
                 fh.flush_ret = -errno.EINVAL              
