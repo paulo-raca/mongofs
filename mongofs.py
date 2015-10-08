@@ -44,6 +44,8 @@ class MongoFS(RouteFS):
         RouteFS.__init__(self, *args, **kwargs)
         self.fuse_args.add("allow_other", True)
         self.host = "localhost"
+        self.fetch_file_length = False
+        self.hide_id = False
         self.json_escaping = False
         self.json_encoding = "utf8"
         self.json_indent = 4
@@ -56,6 +58,14 @@ class MongoFS(RouteFS):
             metavar="HOSTNAME", 
             default=self.host,
             help="Adress of mongo server. Either host, host:port or a mongo URI [default: %default]")
+        self.parser.add_option(mountopt="hide_id",
+            action="store_true", dest="hide_id",
+            default=self.hide_id,
+            help="Hides '_id' field in document contents [default: %default]")
+        self.parser.add_option(mountopt="fetch_file_length",
+            action="store_true", dest="fetch_file_length",
+            default=self.fetch_file_length,
+            help="Escapes all non-ascii characters on the JSON strings [default: %default]")
         self.parser.add_option(mountopt="json_escaping",
             action="store_true", dest="json_escaping",
             default=self.json_escaping,
@@ -376,8 +386,14 @@ class MongoDocument(BaseMongoNode):
 
     def getattr(self):
         # If the file is already open, return the size of the buffer
-        fh = self.mongofs.open_file_cache.get(self.id, None)
-        if fh is not None:
+        if self.mongofs.fetch_file_length:
+            fh = self.open(0) 
+        else:
+            fh = self.mongofs.open_file_cache.get(self.id, None)
+        print(fh)
+        if isinstance(fh, MongoSharedFileHandle):
+            if self.mongofs.fetch_file_length:
+                self.release(0, fh)
             return fuse.Stat(
                 st_mode=stat.S_IFREG | 0666,
                 st_nlink=1,
@@ -435,7 +451,10 @@ class MongoDocument(BaseMongoNode):
             if doc is None:
                 return -errno.ENOENT
   
-            id = doc.pop("_id")
+            id = doc["_id"]
+            if self.mongofs.hide_id:
+                del doc["_id"]
+
             if len(doc) == 0:
                 json = ""
             else:
