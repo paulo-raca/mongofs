@@ -14,13 +14,30 @@ from bson.objectid import ObjectId
 from bson import SON, Code
 from io import BytesIO
 from expiringdict import ExpiringDict
-
-
+import sys
+import os
+import urlparse, urllib
+try:
+    import notify2
+except:
+    notify2 = None
+    
 #Hack to preserve order of object fields
 def loads(*args, **kwargs):
     kwargs['object_pairs_hook'] = lambda x: bson_object_hook(SON(x))
     return json_loads(*args, **kwargs)
     
+def notify(title, message="", icon="dialog-error", timeout=10000):
+    if notify2 is not None:
+        n = notify2.Notification(title, message, icon)
+        n.timeout = timeout
+        n.show()
+    print(" => %s: %s" % (title, message))
+
+def path2url(path):
+    return path
+    #return urlparse.urljoin(
+      #'file:', urllib.pathname2url(os.path.abspath(path)))
 
 class MongoFS(RouteFS):
     def __init__(self, *args, **kwargs):
@@ -54,7 +71,6 @@ class MongoFS(RouteFS):
             help="Size of indentation on pretty-printed JSON documents [default: %default]")
         
     def escape(self, name):
-        print(repr(name))
         if name == '.':
             return '&period;'
         if name == '.,':
@@ -74,7 +90,8 @@ class MongoFS(RouteFS):
             .replace("&amp;"   , "&")
         
     def fsinit(self):
-        self.mongo = MongoClient(self.host, document_class=SON)
+        self.mongo = MongoClient(self.host, document_class=SON, connectTimeoutMS=2000, socketTimeoutMS=2000, socketKeepAlive=True)
+        notify("MongoFS", "Mounted <i>%s</i> on <a href=\"%s\"><i>%s</i></a>" % (self.host, path2url(self.fuse_args.mountpoint), os.path.abspath(self.fuse_args.mountpoint)), icon="dialog-information")
         
     def statfs(self):
         return fuse.StatVfs(
@@ -386,7 +403,9 @@ class MongoDocument(BaseMongoNode):
         id = self.mongo[self.database][self.collection].insert_one(base_doc).inserted_id
         self.mongo[self.database][self.collection].update({"_id": id}, {"$set": self.filter})
         self.mongofs.directory_cache.clear()
-        return self.open(flags)
+        fh = self.open(flags)
+        fh.buffer.truncate(0)
+        return fh
     
     def unlink(self):
         self.mongo[self.database][self.collection].delete_one(self.filter)
@@ -416,7 +435,7 @@ class MongoDocument(BaseMongoNode):
             if doc is None:
                 return -errno.ENOENT
   
-            id = doc["_id"]
+            id = doc.pop("_id")
             if len(doc) == 0:
                 json = ""
             else:
@@ -434,20 +453,32 @@ class MongoDocument(BaseMongoNode):
             return self.flush(fh)
 
     def flush(self, fh):
-        if fh.dirty:
-            fh.dirty=False
-            try:
-                json = fh.buffer.getvalue()
-                if len(json.strip()):
-                    doc = loads(json.decode(self.mongofs.json_encoding, errors='replace'))
-                else:
-                    doc = {}
-                self.mongo[self.database][self.collection].update({"_id": fh.id}, doc)
-                self.mongofs.directory_cache.clear()
-                fh.flush_ret = 0
-            except:
-                fh.flush_ret = -errno.EINVAL              
-        return fh.flush_ret
+        if not fh.dirty:
+            return fh.flush_ret
+
+        try:
+            json = fh.buffer.getvalue()
+            if len(json.strip()):
+                doc = loads(json.decode(self.mongofs.json_encoding, errors='replace'))
+            else:
+                doc = {}
+        except ValueError,e:
+            notify("Invalid MongoFS document", "\n".join(str(e).split(":")))
+            fh.dirty = False
+            fh.flush_ret = -errno.EIO            
+            return fh.flush_ret
+          
+        try:
+            self.mongo[self.database][self.collection].update({"_id": fh.id}, doc)
+            self.mongofs.directory_cache.clear()
+            fh.dirty = False
+            fh.flush_ret = 0
+            return fh.flush_ret
+        except:
+            fh.flush_ret = -errno.EIO
+            return fh.flush_ret
+
+        
 
     def read(self, length, offset, fh):
         fh.buffer.seek(offset)
@@ -461,4 +492,13 @@ class MongoDocument(BaseMongoNode):
 
 
 if __name__ == '__main__':
+    try:
+        euid=os.geteuid()
+        os.seteuid(int(os.environ['DBUS_UID']))
+        try:
+            notify2.init("MongoFS")
+        finally:
+            os.seteuid(euid)
+    except:
+        pass
     main(MongoFS)
