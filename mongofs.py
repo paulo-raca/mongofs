@@ -16,7 +16,7 @@ from io import BytesIO
 from expiringdict import ExpiringDict
 import sys
 import os
-import urlparse, urllib
+import urllib
 try:
     import notify2
 except:
@@ -35,9 +35,7 @@ def notify(title, message="", icon="dialog-error", timeout=10000):
     print(" => %s: %s" % (title, message))
 
 def path2url(path):
-    return path
-    #return urlparse.urljoin(
-      #'file:', urllib.pathname2url(os.path.abspath(path)))
+    return "file://" + urllib.pathname2url(os.path.abspath(path))
 
 class MongoFS(RouteFS):
     def __init__(self, *args, **kwargs):
@@ -530,11 +528,3 @@ if __name__ == '__main__':
     except:
         pass
     main(MongoFS)
-    
-#def test(a):
-    #b = MongoFS().escape(a)
-    #c = MongoFS().unescape(b)
-    #print repr(a), repr(b), repr(c), a == c
-#test(u"a.b")
-#test(u".")
-#test(u"/")
