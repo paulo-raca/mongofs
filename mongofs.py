@@ -81,23 +81,32 @@ class MongoFS(RouteFS):
             help="Size of indentation on pretty-printed JSON documents [default: %default]")
         
     def escape(self, name):
-        if name == '.':
-            return '&period;'
-        if name == '.,':
-            return '&period;&period;'
-        return name \
-            .replace("&" , "&amp;")  \
-            .replace("/" , "&sol;")  \
-            .replace("\\", "&bsol;") \
-            .replace("|" , "&vert;")
-            
+        ret = u""
+        for char in name:
+            #Filenames starting with ".", zero-length space and division-slash require escaping
+            if (char == u"." and ret == u"") or char in [u"\u200B", u"\u2215"]:
+                ret += u"\u200B" + char
+            #Slashes can only be used as folder separators. Use division-slash instead
+            elif char == u"/":
+                ret += u"\u2215"
+            else:
+                ret += char
+        return ret
+      
     def unescape(self, name):
-        return name \
-            .replace("&sol;"   , "/")  \
-            .replace("&bsol;"  , "\\") \
-            .replace("&vert;"  , "|")  \
-            .replace("&period;", ".")  \
-            .replace("&amp;"   , "&")
+        ret = u""
+        escaped = False
+        for char in name:
+            if escaped:
+                ret += char
+                escaped = False
+            elif char == u"\u200B":
+                escaped = True
+            elif char == u"\u2215":
+                ret += u"/"
+            else:
+                ret += char
+        return ret
         
     def fsinit(self):
         self.mongo = MongoClient(self.host, document_class=SON, connectTimeoutMS=2000, socketTimeoutMS=2000, socketKeepAlive=True)
@@ -195,6 +204,7 @@ class BaseMongoNode():
         yield fuse.Direntry('.')
         yield fuse.Direntry('..')
         for x in elements:
+            print(">> " + x + " | " + self.mongofs.escape(x) + " | " + repr(self.mongofs.escape(x)))
             yield fuse.Direntry(self.mongofs.escape(x).encode("utf8"))
 
 
@@ -520,3 +530,11 @@ if __name__ == '__main__':
     except:
         pass
     main(MongoFS)
+    
+#def test(a):
+    #b = MongoFS().escape(a)
+    #c = MongoFS().unescape(b)
+    #print repr(a), repr(b), repr(c), a == c
+#test(u"a.b")
+#test(u".")
+#test(u"/")
