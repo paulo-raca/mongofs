@@ -62,13 +62,13 @@ class MongoFS(RouteFS):
             action="store_true", dest="hide_id",
             default=self.hide_id,
             help="Hides '_id' field in document contents [default: %default]")
-        self.parser.add_option(mountopt="fetch_file_length",
-            action="store_true", dest="fetch_file_length",
-            default=self.fetch_file_length,
-            help="Escapes all non-ascii characters on the JSON strings [default: %default]")
         self.parser.add_option(mountopt="json_escaping",
             action="store_true", dest="json_escaping",
             default=self.json_escaping,
+            help="Escapes all non-ascii characters on the JSON strings [default: %default]")
+        self.parser.add_option(mountopt="fetch_file_length",
+            action="store_true", dest="fetch_file_length",
+            default=self.fetch_file_length,
             help="Escapes all non-ascii characters on the JSON strings [default: %default]")
         self.parser.add_option(mountopt="json_encoding",
             metavar="ENCODING", 
@@ -390,7 +390,6 @@ class MongoDocument(BaseMongoNode):
             fh = self.open(0) 
         else:
             fh = self.mongofs.open_file_cache.get(self.id, None)
-        print(fh)
         if isinstance(fh, MongoSharedFileHandle):
             if self.mongofs.fetch_file_length:
                 self.release(0, fh)

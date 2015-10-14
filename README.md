@@ -55,6 +55,4 @@ Supported operations:
 TODO:
 
 - Read/Write documents using [Mongo's Query Syntax](http://docs.mongodb.org/manual/reference/mongodb-extended-json/)
-- Support for O_APPEND _?_
-- Support for rename
-- getattr is quite slow, since it needs to read the whole document, transform to a JSon string and calculate the length.
+- Support for renaming filters and files
