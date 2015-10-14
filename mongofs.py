@@ -76,7 +76,7 @@ class MongoFS(RouteFS):
             metavar="INDENTATION", 
             default=self.json_indent,
             type=int,
-            help="Size of indentation on pretty-printed JSON documents [default: %default]")
+            help="Size of indentation on pretty-printed JSON documents (Use -1 for compact JSON) [default: %default]")
         
     def escape(self, name):
         ret = u""
@@ -465,7 +465,7 @@ class MongoDocument(BaseMongoNode):
             if len(doc) == 0:
                 json = ""
             else:
-                json = dumps(doc, indent=self.mongofs.json_indent, ensure_ascii=self.mongofs.json_escaping).encode(self.mongofs.json_encoding, errors='replace') + "\n"
+                json = dumps(doc, indent=self.mongofs.json_indent if self.mongofs.json_indent >= 0 else None, ensure_ascii=self.mongofs.json_escaping).encode(self.mongofs.json_encoding, errors='replace') + "\n"
             
             fh = MongoSharedFileHandle(BytesIO(json), id)
             self.mongofs.open_file_cache[self.id] = fh
