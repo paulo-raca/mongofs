@@ -1,0 +1,26 @@
+#!/bin/bash
+
+script_path=`realpath $0 | xargs dirname`
+cd $script_path
+
+env_vars="USER DBUS_SESSION_BUS_ADDRESS DISPLAY XAUTHORITY HOME"
+
+XPID=`pgrep kate | head -n 1`
+for var in $env_vars; do
+    eval export $(grep -z ^${var}= /proc/$XPID/environ)
+    eval echo $(grep -z ^${var}= /proc/$XPID/environ)
+done
+export DBUS_UID=`cat /proc/$XPID/status | grep ^Uid: | cut -f 2`
+
+echo DBUS=$DBUS_UID
+
+
+export PYTHONPATH=./python-routefs-master
+if [ ! -d $PYTHONPATH ]; then
+    wget https://codeload.github.com/paulo-raca/python-routefs/zip/master -O python-routefs.zip
+    unzip -x python-routefs.zip
+    rm python-routefs.zip
+fi
+
+python mongofs.py $2 -ohost=$1 "${@:2}"
+ 
