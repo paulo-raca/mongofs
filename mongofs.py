@@ -409,7 +409,7 @@ class MongoDocument(BaseMongoNode):
                     return fuse.Stat(
                         st_mode=stat.S_IFREG | 0666,
                         st_nlink=1,
-                        st_size=0)
+                        st_size=1)
               
         return -errno.ENOENT  
       
