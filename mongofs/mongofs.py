@@ -1,38 +1,23 @@
 #!/usr/bin/python
 # -*- coding: utf-8 -*-
 
+from __future__ import absolute_import, print_function
+
 import stat
 import errno
 import fuse
 import os
-from routefs import RouteFS, main, TreeEntry, RouteStat
+import urllib
+from io import BytesIO
+from routefs import RouteFS
 from routes import Mapper
 from pymongo import MongoClient
-from bson.json_util import dumps, object_hook as bson_object_hook
-from json import loads as json_loads
-from bson.objectid import ObjectId
 from bson import SON, Code
-from io import BytesIO
 from expiringdict import ExpiringDict
-import sys
-import os
-import urllib
-try:
-    import notify2
-except:
-    notify2 = None
-    
-#Hack to preserve order of object fields
-def loads(*args, **kwargs):
-    kwargs['object_pairs_hook'] = lambda x: bson_object_hook(SON(x))
-    return json_loads(*args, **kwargs)
-    
-def notify(title, message="", icon="dialog-error", timeout=10000):
-    if notify2 is not None:
-        n = notify2.Notification(title, message, icon)
-        n.timeout = timeout
-        n.show()
-    print(" => %s: %s" % (title, message))
+
+from mongofs.notify import notify
+from mongofs.escaping import escape, unescape
+from mongofs.json import dumps, loads
 
 def path2url(path):
     return "file://" + urllib.pathname2url(os.path.abspath(path))
@@ -78,34 +63,6 @@ class MongoFS(RouteFS):
             type=int,
             help="Size of indentation on pretty-printed JSON documents (Use -1 for compact JSON) [default: %default]")
         
-    def escape(self, name):
-        ret = u""
-        for char in name:
-            #Filenames starting with ".", zero-length space and division-slash require escaping
-            if (char == u"." and ret == u"") or char in [u"\u200B", u"\u2215"]:
-                ret += u"\u200B" + char
-            #Slashes can only be used as folder separators. Use division-slash instead
-            elif char == u"/":
-                ret += u"\u2215"
-            else:
-                ret += char
-        return ret
-      
-    def unescape(self, name):
-        ret = u""
-        escaped = False
-        for char in name:
-            if escaped:
-                ret += char
-                escaped = False
-            elif char == u"\u200B":
-                escaped = True
-            elif char == u"\u2215":
-                ret += u"/"
-            else:
-                ret += char
-        return ret
-        
     def fsinit(self):
         self.mongo = MongoClient(self.host, document_class=SON, connectTimeoutMS=2000, socketTimeoutMS=2000, socketKeepAlive=True)
         notify("MongoFS", "Mounted <i>%s</i> on <a href=\"%s\"><i>%s</i></a>" % (self.host, path2url(self.fuse_args.mountpoint), os.path.abspath(self.fuse_args.mountpoint)), icon="dialog-information")
@@ -137,19 +94,19 @@ class MongoFS(RouteFS):
         
     def getDatabase(self, database, **kwargs):
         try:
-            return MongoDatabase(self, self.unescape(database))
+            return MongoDatabase(self, unescape(database))
         except:
             return None
         
     def getCollection(self, database, collection, **kwargs):
         try:
-            return MongoCollection(self, self.unescape(database), self.unescape(collection))
+            return MongoCollection(self, unescape(database), unescape(collection))
         except:
             return None
         
     def parse_path(self, filter_path):
         try: 
-            filter_path = tuple(map(self.unescape, filter_path.split("/")))
+            filter_path = tuple(map(unescape, filter_path.split("/")))
             filter = SON(zip(filter_path[0::2], map(loads, list(filter_path[1::2]))))
             current_field = filter_path[-1] if (len(filter_path) % 2) == 1 else None
             return (filter, current_field)
@@ -159,7 +116,7 @@ class MongoFS(RouteFS):
     def getFilter(self, database, collection, filter_path, **kwargs):
         try:
             filter, current_field = self.parse_path(filter_path)
-            return MongoFilter(self, self.unescape(database), self.unescape(collection), filter, current_field)
+            return MongoFilter(self, unescape(database), unescape(collection), filter, current_field)
         except:
             return None
           
@@ -167,7 +124,7 @@ class MongoFS(RouteFS):
         try:
             filter, current_field = self.parse_path(filter_path)
             if current_field is None:
-                return MongoDocument(self, self.unescape(database), self.unescape(collection), filter)
+                return MongoDocument(self, unescape(database), unescape(collection), filter)
         except:
             return None
 
@@ -202,8 +159,7 @@ class BaseMongoNode():
         yield fuse.Direntry('.')
         yield fuse.Direntry('..')
         for x in elements:
-            print(">> " + x + " | " + self.mongofs.escape(x) + " | " + repr(self.mongofs.escape(x)))
-            yield fuse.Direntry(self.mongofs.escape(x).encode("utf8"))
+            yield fuse.Direntry(escape(x).encode("utf8"))
 
 
 class MongoRoot(BaseMongoNode):
@@ -515,16 +471,3 @@ class MongoDocument(BaseMongoNode):
         fh.buffer.seek(offset)
         fh.buffer.write(buffer)
         return len(buffer)
-
-
-if __name__ == '__main__':
-    try:
-        euid=os.geteuid()
-        os.seteuid(int(os.environ['DBUS_UID']))
-        try:
-            notify2.init("MongoFS")
-        finally:
-            os.seteuid(euid)
-    except:
-        pass
-    main(MongoFS)
