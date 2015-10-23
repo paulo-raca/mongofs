@@ -448,6 +448,8 @@ class MongoDocument(BaseMongoNode):
             return fh.flush_ret
           
         try:
+            doc.update(self.filter)
+
             if fh.id is None:
                 fh.id = self.mongo[self.database][self.collection].insert_one(doc).inserted_id
             else:
