@@ -3,7 +3,7 @@ from setuptools import setup
 setup(
   name = 'mongofs',
   packages = ['mongofs'], # this must be the same as the name above
-  version = '0.1.0.1',
+  version = '0.1.0.2',
   description = 'Access Mongo documents in a FUSE filesystem',
   author = 'Paulo Costa',
   author_email = 'me@paulo.costa.nom.br',
