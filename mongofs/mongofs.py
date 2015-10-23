@@ -378,12 +378,9 @@ class MongoDocument(BaseMongoNode):
         return -errno.ENOENT  
       
     def create(self, flags, mode):
-        base_doc = {"_id": self.filter["_id"]} if "_id" in self.filter else {}
-        id = self.mongo[self.database][self.collection].insert_one(base_doc).inserted_id
-        self.mongo[self.database][self.collection].update({"_id": id}, {"$set": self.filter})
-        self.mongofs.directory_cache.clear()
-        fh = self.open(flags)
-        fh.buffer.truncate(0)
+        fh = MongoSharedFileHandle(BytesIO(), None)
+        self.mongofs.open_file_cache[self.id] = fh
+        fh.refs += 1
         return fh
     
     def unlink(self):
@@ -451,7 +448,10 @@ class MongoDocument(BaseMongoNode):
             return fh.flush_ret
           
         try:
-            self.mongo[self.database][self.collection].update({"_id": fh.id}, doc)
+            if fh.id is None:
+                fh.id = self.mongo[self.database][self.collection].insert_one(doc).inserted_id
+            else:
+                self.mongo[self.database][self.collection].update({"_id": fh.id}, doc)
             self.mongofs.directory_cache.clear()
             fh.dirty = False
             fh.flush_ret = 0
